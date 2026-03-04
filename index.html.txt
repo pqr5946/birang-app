@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Birang 데이터 수집기</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- React & ReactDOM -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    <!-- Babel for JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <style>
+        body { background-color: #111827; margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
+        /* 스크롤바 숨기기 (앱처럼 보이게) */
+        ::-webkit-scrollbar { display: none; }
+        .pb-safe { padding-bottom: env(safe-area-inset-bottom, 20px); }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        function App() {
+            const [activeTab, setActiveTab] = useState('teacher');
+            const [phase, setPhase] = useState('baseline');
+            const [showQRModal, setShowQRModal] = useState(false);
+            const [currentUrl, setCurrentUrl] = useState('');
+
+            // 커스텀 알림(토스트) 및 모달 상태 추가 (alert, confirm 대체)
+            const [toast, setToast] = useState({ show: false, message: '' });
+            const [modal, setModal] = useState({ show: false, message: '', onConfirm: null });
+
+            const showToast = (message) => {
+                setToast({ show: true, message });
+                setTimeout(() => setToast({ show: false, message: '' }), 3000);
+            };
+
+            // 로컬 스토리지에서 데이터 불러오기 (서버 없이 스마트폰에 저장)
+            const [logs, setLogs] = useState(() => {
+                const savedLogs = localStorage.getItem('birang_pilot_logs');
+                if (savedLogs) {
+                    return JSON.parse(savedLogs);
+                }
+                return [];
+            });
+
+            // logs가 변경될 때마다 로컬 스토리지 자동 저장
+            useEffect(() => {
+                localStorage.setItem('birang_pilot_logs', JSON.stringify(logs));
+            }, [logs]);
+
+            useEffect(() => {
+                setCurrentUrl(window.location.href);
+            }, []);
+
+            // --- Teacher State ---
+            const [wTime, setWTime] = useState(0);
+            const [isWActive, setIsWActive] = useState(false);
+            const [tTime, setTTime] = useState(0);
+            const [isTActive, setIsTActive] = useState(false);
+            const [cCount, setCCount] = useState(0);
+            const [studentReaction, setStudentReaction] = useState('');
+
+            // --- Student State ---
+            const [stuckTime, setStuckTime] = useState(0);
+            const [isStuck, setIsStuck] = useState(false);
+            const [stuckPoint, setStuckPoint] = useState('');
+            const [nextStep, setNextStep] = useState('');
+
+            // Timers
+            useEffect(() => {
+                let interval = null;
+                if (isWActive) interval = setInterval(() => setWTime(w => w + 1), 1000);
+                else if (!isWActive && wTime !== 0) clearInterval(interval);
+                return () => clearInterval(interval);
+            }, [isWActive, wTime]);
+
+            useEffect(() => {
+                let interval = null;
+                if (isTActive) interval = setInterval(() => setTTime(t => t + 1), 1000);
+                else if (!isTActive && tTime !== 0) clearInterval(interval);
+                return () => clearInterval(interval);
+            }, [isTActive, tTime]);
+
+            useEffect(() => {
+                let interval = null;
+                if (isStuck) interval = setInterval(() => setStuckTime(s => s + 1), 1000);
+                else if (!isStuck && stuckTime !== 0) clearInterval(interval);
+                return () => clearInterval(interval);
+            }, [isStuck, stuckTime]);
+
+            const formatTime = (seconds) => {
+                const m = Math.floor(seconds / 60).toString().padStart(2, '0');
+                const s = (seconds % 60).toString().padStart(2, '0');
+                return `${m}:${s}`;
+            };
+
+            const saveTeacherLog = () => {
+                const newLog = {
+                    id: Date.now(),
+                    timestamp: new Date().toISOString(),
+                    displayTime: new Date().toLocaleString(),
+                    role: 'Teacher',
+                    phase: phase === 'baseline' ? '1주차(기존)' : '2주차(Birang)',
+                    watchingTime_sec: wTime,
+                    teachingTime_sec: tTime,
+                    coachingCount: cCount,
+                    reaction: studentReaction || '없음',
+                    stuckTime_sec: '-',
+                    selfExplanation: '-'
+                };
+                setLogs(prev => [newLog, ...prev]);
+                setWTime(0); setTTime(0); setCCount(0); setStudentReaction('');
+                setIsWActive(false); setIsTActive(false);
+                showToast('✅ 선생님 기록이 기기에 저장되었습니다!');
+            };
+
+            const saveStudentLog = () => {
+                if(!stuckPoint && !nextStep) { showToast('⚠️ 메모를 한 줄이라도 작성해주세요!'); return; }
+                const newLog = {
+                    id: Date.now(),
+                    timestamp: new Date().toISOString(),
+                    displayTime: new Date().toLocaleString(),
+                    role: 'Student',
+                    phase: phase === 'baseline' ? '1주차(기존)' : '2주차(Birang)',
+                    watchingTime_sec: '-',
+                    teachingTime_sec: '-',
+                    coachingCount: '-',
+                    reaction: '-',
+                    stuckTime_sec: stuckTime,
+                    selfExplanation: `막힌곳: ${stuckPoint} / 다음: ${nextStep}`
+                };
+                setLogs(prev => [newLog, ...prev]);
+                setStuckTime(0); setStuckPoint(''); setNextStep(''); setIsStuck(false);
+                showToast('✅ 학생 기록이 기기에 저장되었습니다!');
+            };
+
+            // 기존의 불편했던 '다운로드' 대신 '스마트폰 바로 공유(카톡 등)' 기능으로 전면 교체!
+            const shareData = async () => {
+                if (logs.length === 0) { 
+                    showToast('⚠️ 보낼 데이터가 없습니다. 먼저 기록해주세요.'); 
+                    return; 
+                }
+                const headers = ['시간', '기록자', '실험단계', 'W(기다림_초)', 'T(직접설명_초)', 'C(질문횟수)', '학생반응', '정지재개시간(초)', '자기설명기록'];
+                const csvRows = [headers.join(',')];
+                logs.forEach(log => {
+                    csvRows.push([
+                        `"${log.displayTime || log.timestamp}"`, log.role, log.phase,
+                        log.watchingTime_sec, log.teachingTime_sec, log.coachingCount,
+                        `"${log.reaction}"`, log.stuckTime_sec, `"${log.selfExplanation}"`
+                    ].join(','));
+                });
+                
+                try {
+                    const csvContent = "\uFEFF" + csvRows.join('\n'); // 엑셀 한글 깨짐 방지 BOM
+                    const file = new File([csvContent], "birang_pilot_data.csv", { type: "text/csv;charset=utf-8;" });
+
+                    // 1단계: 스마트폰 기본 공유 기능 (카카오톡 등) 시도
+                    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+                        try {
+                            await navigator.share({
+                                files: [file],
+                                title: 'Birang 데이터 전송',
+                                text: '선생님의 Birang 파일럿 테스트 데이터입니다.'
+                            });
+                            showToast('✅ 카카오톡/문자 전송 창이 열렸습니다!');
+                            return; // 공유 성공시 여기서 종료
+                        } catch (shareError) {
+                            console.log('공유 취소 또는 미리보기 환경 차단:', shareError);
+                            // 미리보기 화면이라 차단된 경우 아래 2단계 다운로드로 넘어감
+                        }
+                    } 
+                    
+                    // 2단계: 공유 기능을 지원하지 않는 PC나 미리보기 환경을 위한 강제 다운로드
+                    const url = URL.createObjectURL(file);
+                    const link = document.createElement('a'); 
+                    link.setAttribute("href", url); 
+                    link.setAttribute("download", "birang_pilot_data.csv");
+                    document.body.appendChild(link); 
+                    link.click(); 
+                    document.body.removeChild(link);
+                    URL.revokeObjectURL(url);
+                    showToast('📥 PC/미리보기 환경이라 파일이 다운로드되었습니다.');
+                    
+                } catch (error) {
+                    showToast('⚠️ 오류가 발생했습니다. 다시 시도해주세요.');
+                    console.error(error);
+                }
+            };
+
+            const deleteData = () => {
+                setModal({
+                    show: true,
+                    message: '정말 모든 기기 내 데이터를 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.',
+                    onConfirm: () => {
+                        setLogs([]);
+                        localStorage.removeItem('birang_pilot_logs');
+                        showToast('🗑️ 데이터가 초기화되었습니다.');
+                    }
+                });
+            };
+
+            return (
+                <div className="bg-gray-900 min-h-screen font-sans flex justify-center">
+                    <div className="w-full max-w-md bg-gray-50 flex flex-col h-screen relative shadow-2xl overflow-hidden">
+                        
+                        <header className="bg-indigo-600 text-white p-4 pb-6 rounded-b-3xl shadow-md shrink-0 z-10 relative">
+                            <div className="flex justify-between items-center mb-4">
+                                <h1 className="text-xl font-bold flex items-center gap-2">
+                                    <i className="fas fa-check-circle"></i> Birang App
+                                </h1>
+                                <div className="flex items-center gap-3">
+                                    <div className="px-2 py-1 bg-green-500 rounded text-[10px] font-bold shadow-sm">
+                                        스마트폰 자동저장 켜짐
+                                    </div>
+                                    <button onClick={() => setShowQRModal(true)} className="p-2 bg-indigo-500 rounded-full hover:bg-indigo-400 transition">
+                                        <i className="fas fa-qrcode"></i>
+                                    </button>
+                                </div>
+                            </div>
+                            <div className="flex bg-indigo-800 p-1 rounded-xl">
+                                <button onClick={() => setPhase('baseline')} className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${phase === 'baseline' ? 'bg-white text-indigo-700 shadow-sm' : 'text-indigo-200'}`}>
+                                    1주차 (기존)
+                                </button>
+                                <button onClick={() => setPhase('birang')} className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${phase === 'birang' ? 'bg-white text-indigo-700 shadow-sm' : 'text-indigo-200'}`}>
+                                    2주차 (비랑)
+                                </button>
+                            </div>
+                        </header>
+
+                        <main className="flex-1 overflow-y-auto p-4 pb-24">
+                            {/* TEACHER TAB */}
+                            {activeTab === 'teacher' && (
+                                <div className="space-y-4">
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 flex flex-col items-center">
+                                            <span className="text-xs text-gray-400 font-bold mb-1">기다린 시간 (W)</span>
+                                            <div className="text-3xl font-mono font-black text-gray-800 mb-3">{formatTime(wTime)}</div>
+                                            <div className="flex gap-2 w-full">
+                                                <button onClick={() => {setIsWActive(!isWActive); setIsTActive(false);}} className={`flex-1 py-2 rounded-xl flex justify-center items-center text-white ${isWActive ? 'bg-red-500' : 'bg-indigo-500'}`}>
+                                                    <i className={isWActive ? "fas fa-stop" : "fas fa-play"}></i>
+                                                </button>
+                                                <button onClick={() => {setWTime(0); setIsWActive(false);}} className="p-2 bg-gray-100 text-gray-500 rounded-xl">
+                                                    <i className="fas fa-redo"></i>
+                                                </button>
+                                            </div>
+                                        </div>
+                                        <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 flex flex-col items-center">
+                                            <span className="text-xs text-gray-400 font-bold mb-1">직접 설명 (T)</span>
+                                            <div className="text-3xl font-mono font-black text-red-500 mb-3">{formatTime(tTime)}</div>
+                                            <div className="flex gap-2 w-full">
+                                                <button onClick={() => {setIsTActive(!isTActive); setIsWActive(false);}} className={`flex-1 py-2 rounded-xl flex justify-center items-center text-white ${isTActive ? 'bg-red-500' : 'bg-orange-500'}`}>
+                                                    <i className={isTActive ? "fas fa-stop" : "fas fa-play"}></i>
+                                                </button>
+                                                <button onClick={() => {setTTime(0); setIsTActive(false);}} className="p-2 bg-gray-100 text-gray-500 rounded-xl">
+                                                    <i className="fas fa-redo"></i>
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 flex items-center justify-between">
+                                        <div>
+                                            <h3 className="font-bold text-gray-800">코칭 (질문)</h3>
+                                            <p className="text-xs text-gray-400">학생에게 던진 질문 횟수</p>
+                                        </div>
+                                        <div className="flex items-center gap-3">
+                                            <button onClick={() => setCCount(Math.max(0, cCount - 1))} className="w-10 h-10 rounded-full bg-gray-100 text-gray-600 font-bold text-xl">-</button>
+                                            <span className="text-xl font-bold w-4 text-center">{cCount}</span>
+                                            <button onClick={() => setCCount(cCount + 1)} className="w-10 h-10 rounded-full bg-indigo-100 text-indigo-600 font-bold text-xl">+</button>
+                                        </div>
+                                    </div>
+                                    <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
+                                        <h3 className="font-bold text-gray-800 mb-2">최종 반응</h3>
+                                        <div className="grid grid-cols-2 gap-2">
+                                            {['말문 트임', '메모 시작', '풀이 재개', '이탈/포기'].map(reaction => (
+                                                <button key={reaction} onClick={() => setStudentReaction(reaction)} 
+                                                    className={`py-2 rounded-xl text-sm font-bold border ${studentReaction === reaction ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-gray-50 text-gray-600 border-gray-200'}`}>
+                                                    {reaction}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                    <button onClick={saveTeacherLog} className="w-full mt-4 py-4 bg-indigo-600 text-white rounded-2xl font-bold flex justify-center items-center gap-2 shadow-lg active:scale-95 transition-transform">
+                                        <i className="fas fa-save"></i> 데이터 저장하기
+                                    </button>
+                                </div>
+                            )}
+
+                            {/* STUDENT TAB */}
+                            {activeTab === 'student' && (
+                                <div className="space-y-4 h-full flex flex-col">
+                                    <div className={`rounded-3xl p-6 flex flex-col items-center justify-center transition-colors ${isStuck ? 'bg-orange-100 border-2 border-orange-400' : 'bg-white shadow-sm border border-gray-100'}`}>
+                                        <i className={`fas fa-clock text-4xl mb-4 ${isStuck ? 'text-orange-500 animate-pulse' : 'text-gray-300'}`}></i>
+                                        <div className="text-5xl font-mono font-black text-gray-800 mb-6">{formatTime(stuckTime)}</div>
+                                        {!isStuck ? (
+                                            <button onClick={() => setIsStuck(true)} className="w-full py-4 bg-gray-900 text-white rounded-2xl font-bold shadow-md text-lg">
+                                                🚨 나 지금 막혔어요
+                                            </button>
+                                        ) : (
+                                            <button onClick={() => setIsStuck(false)} className="w-full py-4 bg-green-500 text-white rounded-2xl font-bold shadow-md text-lg flex justify-center items-center gap-2">
+                                                <i className="fas fa-play"></i> 다시 풀기 시작
+                                            </button>
+                                        )}
+                                    </div>
+                                    <div className="bg-white rounded-3xl p-5 shadow-sm border border-gray-100 space-y-4 flex-1">
+                                        <div>
+                                            <label className="block text-sm font-bold text-gray-700 mb-2">1. 막힌 지점은 어디인가요?</label>
+                                            <input type="text" value={stuckPoint} onChange={(e) => setStuckPoint(e.target.value)} placeholder="예: 분수의 나눗셈 원리" className="w-full bg-gray-50 border-none rounded-xl p-4 focus:ring-2 focus:ring-green-500 outline-none text-sm" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-bold text-gray-700 mb-2">2. 다음 시도해볼 것은?</label>
+                                            <input type="text" value={nextStep} onChange={(e) => setNextStep(e.target.value)} placeholder="예: 선생님께 질문한다" className="w-full bg-gray-50 border-none rounded-xl p-4 focus:ring-2 focus:ring-green-500 outline-none text-sm" />
+                                        </div>
+                                    </div>
+                                    <button onClick={saveStudentLog} className="w-full py-4 bg-green-600 text-white rounded-2xl font-bold flex justify-center items-center gap-2 shadow-lg active:scale-95 transition-transform mt-auto">
+                                        <i className="fas fa-save"></i> 자기설명 기록 제출
+                                    </button>
+                                </div>
+                            )}
+
+                            {/* DASHBOARD TAB */}
+                            {activeTab === 'dashboard' && (
+                                <div className="space-y-4">
+                                    <div className="bg-white rounded-3xl p-5 shadow-sm border border-gray-100">
+                                        <div className="flex justify-between items-center mb-4">
+                                            <div>
+                                                <h2 className="font-bold text-gray-800">내 기기 누적 데이터</h2>
+                                                <p className="text-xs text-gray-400">총 {logs.length}건 수집됨</p>
+                                            </div>
+                                            {/* 버튼 디자인을 카카오톡 느낌으로 변경 */}
+                                            <button onClick={shareData} className="px-4 py-3 bg-yellow-400 text-yellow-900 rounded-xl shadow-md font-bold flex items-center gap-2 active:scale-95 transition-transform">
+                                                <i className="fas fa-paper-plane"></i> 카톡 전송
+                                            </button>
+                                        </div>
+                                        <div className="space-y-3 max-h-[50vh] overflow-y-auto pr-2">
+                                            {logs.length === 0 ? (
+                                                <div className="text-center text-gray-400 py-10 text-sm">기록이 없습니다.</div>
+                                            ) : (
+                                                logs.map((log) => (
+                                                    <div key={log.id} className="bg-gray-50 p-3 rounded-xl border border-gray-100 text-xs">
+                                                        <div className="flex justify-between mb-1">
+                                                            <span className={`font-bold px-2 py-0.5 rounded text-[10px] ${log.phase.includes('1주차') ? 'bg-gray-200 text-gray-600' : 'bg-indigo-100 text-indigo-700'}`}>{log.phase}</span>
+                                                            <span className="text-gray-400">{log.displayTime?.split(' ')[1] || ''}</span>
+                                                        </div>
+                                                        <div className="font-medium text-gray-800 mt-1">
+                                                            <span className={`mr-1 ${log.role === 'Teacher' ? 'text-indigo-600' : 'text-green-600'}`}>[{log.role}]</span>
+                                                            {log.role === 'Teacher' 
+                                                                ? `W:${log.watchingTime_sec}s / T:${log.teachingTime_sec}s / C:${log.coachingCount}회`
+                                                                : `정지: ${log.stuckTime_sec}s`}
+                                                        </div>
+                                                        <div className="text-gray-500 mt-1 truncate">
+                                                            {log.role === 'Teacher' ? `반응: ${log.reaction}` : log.selfExplanation}
+                                                        </div>
+                                                    </div>
+                                                ))
+                                            )}
+                                        </div>
+                                        {logs.length > 0 && (
+                                            <button onClick={deleteData} className="w-full mt-4 py-2 text-xs text-red-500 font-bold border border-red-200 rounded-xl hover:bg-red-50">
+                                                모든 기록 삭제 (초기화)
+                                            </button>
+                                        )}
+                                    </div>
+                                    <div className="bg-yellow-50 p-4 rounded-xl text-xs text-yellow-800 leading-relaxed border border-yellow-200 shadow-sm">
+                                        <b className="block mb-1 text-yellow-900">💡 초간단 데이터 전송 안내</b>
+                                        위 <b>[카톡 전송]</b> 버튼을 누르면 스마트폰의 카카오톡 공유 창이 뜹니다! 다운로드 폴더를 찾을 필요 없이, 연구자님(질문자님)을 선택해서 바로 보내주시면 끝납니다.
+                                    </div>
+                                </div>
+                            )}
+                        </main>
+
+                        <nav className="absolute bottom-0 w-full bg-white border-t border-gray-200 pb-safe pt-2 px-4 shadow-[0_-4px_15px_rgba(0,0,0,0.05)] z-20">
+                            <div className="flex justify-around items-center pb-2">
+                                <button onClick={() => setActiveTab('teacher')} className={`flex flex-col items-center gap-1 p-2 w-20 transition-colors ${activeTab === 'teacher' ? 'text-indigo-600' : 'text-gray-400'}`}>
+                                    <i className="fas fa-user-check text-xl"></i>
+                                    <span className="text-[10px] font-bold">선생님</span>
+                                </button>
+                                <button onClick={() => setActiveTab('student')} className={`flex flex-col items-center gap-1 p-2 w-20 transition-colors ${activeTab === 'student' ? 'text-green-600' : 'text-gray-400'}`}>
+                                    <i className="fas fa-book-open text-xl"></i>
+                                    <span className="text-[10px] font-bold">학생</span>
+                                </button>
+                                <button onClick={() => setActiveTab('dashboard')} className={`flex flex-col items-center gap-1 p-2 w-20 transition-colors ${activeTab === 'dashboard' ? 'text-gray-900' : 'text-gray-400'}`}>
+                                    <i className="fas fa-chart-bar text-xl"></i>
+                                    <span className="text-[10px] font-bold">데이터</span>
+                                </button>
+                            </div>
+                        </nav>
+
+                        {showQRModal && (
+                            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm z-50 flex justify-center items-center p-4">
+                                <div className="bg-white rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl">
+                                    <div className="p-6 flex flex-col items-center relative text-center">
+                                        <button onClick={() => setShowQRModal(false)} className="absolute top-4 right-4 p-2 bg-gray-100 text-gray-500 rounded-full hover:bg-gray-200">
+                                            <i className="fas fa-times"></i>
+                                        </button>
+                                        <div className="w-12 h-12 bg-indigo-100 text-indigo-600 rounded-full flex justify-center items-center mb-4">
+                                            <i className="fas fa-share-alt text-xl"></i>
+                                        </div>
+                                        <h2 className="text-xl font-bold text-gray-800 mb-2">현재 앱 공유하기</h2>
+                                        <p className="text-sm text-gray-500 mb-6">스마트폰 카메라로 스캔하세요.</p>
+                                        <div className="bg-white p-3 rounded-2xl border-2 border-indigo-100 shadow-sm mb-6">
+                                            <img src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(currentUrl)}`} alt="App QR Code" className="w-48 h-48" />
+                                        </div>
+                                        <div className="w-full bg-gray-50 rounded-xl p-4 text-left border border-gray-100">
+                                            <h4 className="text-xs font-bold text-gray-700 mb-2">💡 이 앱의 실제 접속 주소</h4>
+                                            <p className="text-[10px] text-gray-500 break-all">{currentUrl}</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* 커스텀 토스트 알림 */}
+                        {toast.show && (
+                            <div className="absolute top-20 left-1/2 transform -translate-x-1/2 bg-gray-800 text-white px-6 py-3 rounded-full shadow-2xl z-50 text-sm font-bold flex items-center gap-2 animate-in fade-in slide-in-from-top-4">
+                                {toast.message}
+                            </div>
+                        )}
+
+                        {/* 커스텀 확인 모달 */}
+                        {modal.show && (
+                            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm z-50 flex justify-center items-center p-4">
+                                <div className="bg-white rounded-3xl w-full max-w-xs overflow-hidden shadow-2xl p-6 text-center animate-in zoom-in-95">
+                                    <h3 className="text-lg font-bold text-gray-800 mb-3">데이터 초기화</h3>
+                                    <p className="text-sm text-gray-600 mb-6 whitespace-pre-line">{modal.message}</p>
+                                    <div className="flex gap-3">
+                                        <button onClick={() => setModal({ show: false, message: '', onConfirm: null })} className="flex-1 py-3 bg-gray-100 text-gray-700 rounded-xl font-bold">취소</button>
+                                        <button onClick={() => { modal.onConfirm(); setModal({ show: false, message: '', onConfirm: null }); }} className="flex-1 py-3 bg-red-500 text-white rounded-xl font-bold">삭제</button>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                    </div>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
